@@ -1,0 +1,303 @@
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/utsname.h>
+#include <time.h>
+
+int command(char *buff) {
+        int i = 0;
+        char command[50];
+
+        if (buff[0] =='r' && buff[1] == 'u' && buff[2] == 'n' && (strlen(buff) - 1 == 3) ) {
+                return 1;
+        }
+
+        if (buff[0] =='i' && buff[1] == 'n' && buff[2] == 'f' && buff[3] == 'o' && (strlen(buff) - 1 == 4) ) {
+                return 2;
+        }
+
+        if(buff[0] == 'h' && buff[1] == 'e' && buff[2] == 'l' && buff[3] == 'p' && (strlen(buff) -1 == 4) ) {
+                return 3;
+        }
+
+        if(buff[0] == 'q' && buff[1] == 'u' && buff[2] == 'i' && buff[3] == 't' && (strlen(buff) -1 == 4) ) {
+                return 4;
+        }
+
+        if(buff[0] == 'h' && buff[1] == 'a' && buff[2] == 'l' && buff[3] == 't' && (strlen(buff) -1 == 4) ) {
+                return 5;
+        }
+
+return 0;
+}
+
+char *returnCleanString(char *name) {
+        int i =0;
+        for(i = 0; i < strlen(name); i++) {
+                if(name[i] >= '!') {
+                        name[i] = name[i];
+                }else
+                {
+                name[i] = '\0';
+                }
+        }
+return name;
+}
+
+char *run(char *name) {
+        FILE *fr = NULL;
+        char str[1000];
+        char temp[100];
+        char *allSentences = (char *) malloc (100000*sizeof(char));
+        int numberOfLines  =  0 ;
+        fr = fopen(name, "r");
+
+        printf("%s",name);
+        if(fr == NULL) {
+                printf("Nepodarilo sa otvorit subor\n");
+                strcat(allSentences,"Nepodarilo sa otvorit subor\n");
+                return allSentences;
+        }
+
+        while(fgets(str,100,fr) != NULL) {
+                if(str[0] >= 'A' && str[0] <= 'Z') {
+                        strcat(allSentences,str);
+                        numberOfLines++;
+                        }
+        }
+
+        strcat(allSentences, "Pocet riadkov ");
+        sprintf(temp,"%d",numberOfLines);
+        strcat(allSentences,temp );
+        strcat(allSentences,"\n\0");
+        return allSentences;
+
+
+}
+
+char *info () {
+        struct tm *currentTime;
+        char *response = (char*) malloc(100*sizeof(char));
+        time_t readTime;
+        unsigned int seconds = 0;
+        struct utsname *nazovStroja = malloc(sizeof(struct utsname));
+
+        asm("movl $0x0d, %%EAX;"
+            "int $0x80;"
+            :"=q"(seconds)
+        );
+
+
+        //printf("%d",seconds);
+        asm( "movl $122, %%eax;"
+             "int $0x80;"
+             :
+             : "b" (nazovStroja)
+             );
+
+        readTime = seconds;
+        currentTime = localtime(&readTime);
+//      strcat(response,asctime(currentTime));
+        strcat(response, nazovStroja->nodename);
+        return response;
+
+
+}
+
+char *help() {
+        char *help = "help - zobrazenie vsetkych prikazov\ninfo - zobrazenie syst
+        return help;
+
+}
+
+void startServer() {
+        int s = 0,ns = 0, r =0, i = 0, j=0,n = 0;
+        int maximumNumberFiles;
+        char buff[64];
+        char name[50];
+        char *cleanName =NULL;
+        char *response = NULL;
+        struct sockaddr_un ad;
+        fd_set  rs,wrs;
+        printf("Server start\n");
+
+        //vynulujem
+        memset(&ad,0,sizeof(ad));
+
+        ad.sun_family = AF_LOCAL;
+        strcpy(ad.sun_path, "./sck");
+
+        //create socket
+        s = socket(PF_LOCAL,SOCK_STREAM,0);
+
+        if(s==-1) {
+                perror("socket");
+                exit(2);
+        }
+
+        //map and start listening
+        unlink("./sck");
+        bind(s, (struct sockaddr*)&ad,sizeof(ad));
+        listen(s,5);
+        maximumNumberFiles = getdtablesize();
+
+        FD_ZERO(&rs);
+        FD_SET(s,&rs);
+        FD_SET(0,&rs);
+
+        while(1) {
+                FD_ZERO(&wrs);
+                wrs = rs;
+                n = select(maximumNumberFiles, &wrs,NULL, NULL, NULL);
+                if (FD_ISSET(s,&wrs)) {
+                        ns = accept(s,NULL,NULL);
+                        if(ns < 0) {
+                                perror("Chyba");
+                                //continue;
+                        }
+                        FD_SET (ns, &rs);
+                        continue;
+                }
+                for(i = 3; i < maximumNumberFiles; i++) {
+                        if(i != s && FD_ISSET(i, &wrs)) {
+                                r =read(i,&buff,sizeof(buff));
+                                buff[r] = '\0';
+                               if(command(buff) == 0) {
+                                        printf("Neznamy prikaz\n");
+                                        write(i,"Neznamy prikaz\n", 14);
+                                }
+                                if(command(buff) == 1){
+                                        write(i,"Zadajte nazov suboru\n",21);
+                                        r = read(i,&name,sizeof(buff));
+                                        cleanName =  returnCleanString(name);
+                                        response = run(cleanName);
+                                        write(i,response,strlen(response));
+                                }
+
+                                if (command(buff) == 2 ) {
+                                        response = info();
+                                        write(i,response,strlen(response));
+                                }
+
+                                if(command(buff) == 3) {
+                                        response = help();
+                                        write(i,response,strlen(response));
+                                }
+
+                                if(command(buff) == 4) {
+                                        printf("Klient cislo %d sa odpojil", i);
+                                        write(i,"quit\n",5);
+                                        close(i);
+                                        FD_CLR(i, &rs);
+                                }
+
+                                if(command(buff) == 5) {
+
+
+                                }
+
+                                //write(i,response,strlen(response));
+                        }
+                }
+
+        }
+        close(ns);
+}
+
+void startClient() {
+        int s = 0,ns = 0,r = 0,maximumNumberFile = 0;
+        char buff[1000]="ahoj\n";
+        char *response = (char *) malloc (500*sizeof(char));
+        printf("Client start\n");
+        struct sockaddr_un ad;
+
+        memset(&ad,0,sizeof(ad));
+
+        ad.sun_family = AF_LOCAL;
+        strcpy(ad.sun_path,"./sck");
+        s=socket(PF_LOCAL,SOCK_STREAM,0);
+
+        if (s==-1) {
+                perror("socket");
+                exit(2);
+        }
+
+        fd_set rs,wrs;
+        connect(s,(struct sockaddr*)&ad, sizeof(ad));
+
+        maximumNumberFile = getdtablesize();
+        FD_ZERO(&rs);
+        FD_SET(s,&rs);
+        FD_SET(0,&rs);
+        while(1) {
+                response = (char*) malloc (500*sizeof(char));
+                FD_ZERO(&wrs);
+                wrs = rs;
+                if (select(s+1,&wrs,NULL,NULL,NULL) < 0)
+                        perror("zle");
+                        if(strcmp(response,"quit\n") == 0) {
+
+                        exit(EXIT_SUCCESS);
+                        break;
+                        }
+
+
+                        if(FD_ISSET(0,&wrs)) {
+                                r = read(0,response,500);
+                                write(s,response,r);
+                        }
+                        if(strcmp(response,"quit\n")== 0) {
+                        exit(EXIT_SUCCESS);
+                       break;
+                        }
+
+                        if(FD_ISSET(s,&wrs)) {
+                                r = read(s,response,500);
+                                //printf("%d",strcmp(buff,"quit"));
+                                if(strcmp(response,"quit\n") == 0){
+                                        exit(EXIT_SUCCESS);
+                                        break;
+                                }
+                                write(1,response,r);
+                                if(strcmp(response,"quit\n") == 0){
+                                   response = help();
+                                   write(1,response,500);
+                                  exit(EXIT_SUCCESS);
+                                 break;
+                                }
+                        free(response);
+                        }
+
+                FD_ZERO(&rs);
+                FD_SET(0,&rs);
+                FD_SET(s,&rs);
+                }
+        //      write(s,buff,strlen(buff)+1);
+                close(s);
+                exit(EXIT_SUCCESS);
+        }
+
+int main(int argc, char **argv) {
+
+        if(argc == 1) {
+                startServer();
+        }
+        while(argc-- > 1) {
+                if(strcmp(argv[1],"-c")==0) {
+                        startClient();
+                }
+
+                if(strcmp(argv[1],"-s")==0) {
+                        startServer();
+                }
+        }
+printf("sem sme dosli");
+ exit(EXIT_SUCCESS);
+}
+
+
+
